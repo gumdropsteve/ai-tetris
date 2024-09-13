@@ -253,6 +253,68 @@ def draw_window(surface, grid, score=0):
     draw_grid(surface, grid)
     pygame.draw.rect(surface, (255, 0, 0), (top_left_x, top_left_y, play_width, play_height), 5)
 
+def get_height(grid):
+    heights = []
+    for col in zip(*grid):
+        height = 0
+        for cell in col:
+            if cell != (0, 0, 0):
+                height += 1
+        heights.append(height)
+    return heights
+
+def get_holes(grid):
+    holes = 0
+    for col in zip(*grid):
+        block_found = False
+        for cell in col:
+            if cell != (0, 0, 0):
+                block_found = True
+            elif block_found:
+                holes += 1
+    return holes
+
+def evaluate_grid(grid, cleared_lines, heights, holes, bumpiness):
+    return -0.510066 * sum(heights) + 0.760666 * cleared_lines + -0.35663 * holes + -0.184483 * bumpiness
+
+def simulate_move(piece, grid):
+    test_grid = [row[:] for row in grid]
+    while valid_space(piece, test_grid):
+        piece.y += 1
+    piece.y -= 1  # Move back up to last valid position
+    return convert_shape_format(piece), test_grid
+
+def ai_move(current_piece, grid):
+    best_score = -float('inf')
+    best_move = None
+
+    for rotation in range(len(current_piece.shape)):
+        for x in range(-2, 10):
+            test_piece = Piece(x, current_piece.y, current_piece.shape)
+            test_piece.rotation = rotation
+            shape_pos, test_grid = simulate_move(test_piece, grid)
+
+            if not valid_space(test_piece, test_grid):
+                continue
+
+            for i, pos in enumerate(shape_pos):
+                x, y = pos
+                if y > -1:
+                    test_grid[y][x] = test_piece.color
+
+            cleared_lines = clear_rows(test_grid, {})
+            heights = get_height(test_grid)
+            holes = get_holes(test_grid)
+            bumpiness = sum(abs(heights[i] - heights[i + 1]) for i in range(len(heights) - 1))
+
+            score = evaluate_grid(test_grid, cleared_lines, heights, holes, bumpiness)
+
+            if score > best_score:
+                best_score = score
+                best_move = (rotation, x)
+
+    return best_move
+
 def main():
     locked_positions = {}
     grid = create_grid(locked_positions)
@@ -263,24 +325,14 @@ def main():
     next_piece = get_shape()
     clock = pygame.time.Clock()
     fall_time = 0
-    level_time = 0
+    fall_speed = 0.27
     score = 0
 
     while run:
         grid = create_grid(locked_positions)
-        fall_speed = 0.27
-
         fall_time += clock.get_rawtime()
-        level_time += clock.get_rawtime()
         clock.tick()
 
-        # Increase difficulty level
-        if level_time / 1000 > 5:
-            level_time = 0
-            if fall_speed > 0.12:
-                fall_speed -= 0.005
-
-        # Piece falling
         if fall_time / 1000 >= fall_speed:
             fall_time = 0
             current_piece.y += 1
@@ -288,39 +340,23 @@ def main():
                 current_piece.y -= 1
                 change_piece = True
 
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                run = False
-                pygame.display.quit()
-                quit()
-
-            if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_LEFT:
-                    current_piece.x -= 1
-                    if not valid_space(current_piece, grid):
-                        current_piece.x += 1
-                if event.key == pygame.K_RIGHT:
-                    current_piece.x += 1
-                    if not valid_space(current_piece, grid):
-                        current_piece.x -= 1
-                if event.key == pygame.K_DOWN:
-                    current_piece.y += 1
-                    if not valid_space(current_piece, grid):
-                        current_piece.y -= 1
-                if event.key == pygame.K_UP:
-                    current_piece.rotation = current_piece.rotation + 1 % len(current_piece.shape)
-                    if not valid_space(current_piece, grid):
-                        current_piece.rotation = current_piece.rotation - 1 % len(current_piece.shape)
+        # AI makes the move
+        best_move = ai_move(current_piece, grid)
+        if best_move:
+            rotation, x = best_move
+            current_piece.rotation = rotation
+            current_piece.x = x
+            while valid_space(current_piece, grid):
+                current_piece.y += 1
+            current_piece.y -= 1
+            change_piece = True
 
         shape_pos = convert_shape_format(current_piece)
-
-        # Add piece to grid for drawing
         for i in range(len(shape_pos)):
             x, y = shape_pos[i]
             if y > -1:
                 grid[y][x] = current_piece.color
 
-        # Check if piece hit the ground
         if change_piece:
             for pos in shape_pos:
                 p = (pos[0], pos[1])
@@ -334,7 +370,6 @@ def main():
         draw_next_shape(next_piece, win)
         pygame.display.update()
 
-        # Check if user lost
         if check_lost(locked_positions):
             run = False
             draw_text_middle("You Lost", 40, (255, 255, 255), win)
@@ -343,23 +378,7 @@ def main():
 
     pygame.display.quit()
 
-
-def main_menu():
-    run = True
-    while run:
-        win.fill((0, 0, 0))
-        draw_text_middle('Press Any Key To Play', 60, (255, 255, 255), win)
-        pygame.display.update()
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                run = False
-            if event.type == pygame.KEYDOWN:
-                main()
-
-    pygame.quit()
-
-
 win = pygame.display.set_mode((s_width, s_height))
-pygame.display.set_caption('Tetris')
+pygame.display.set_caption('Tetris AI')
 
-main_menu()
+main()
